@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <meta charset="UTF-8">
+    <title>Webcam with GLSL Fragment Shader</title>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <input type="number" min="1" max="" />
+    <video id="video" />
+    <script>
+      function calculateFileSize(width, height, bytesPerPixel, numFrames = 1) {
+        const totalBytes = width * height * bytesPerPixel * numFrames
+        const fileSize = totalBytes / 1024 / 1024
+        return fileSize.toFixed(2) + " MB"
+      }
+
+      function framesToTime(fps, frames) {
+        return (frames / fps).toFixed(2) + "s";
+      }
+
+      // =============== CANVAS ===============
+
+      const WIDTH = 640
+      const HEIGHT = 480
+      let NUM_FRAMES = HEIGHT
+      const USE_VIDEO = false
+      const FPS = 25
+      const PIXEL_TYPE = 'RGB8'
+      const TIME = framesToTime(FPS, NUM_FRAMES)
+
+      const RAM_USAGE = calculateFileSize(WIDTH,HEIGHT,3,NUM_FRAMES)
+
+      const canvas = document.getElementById("canvas");
+      canvas.width = WIDTH;
+      canvas.height = HEIGHT;
+      const gl = canvas.getContext("webgl2");
+      if (!gl) {
+        alert("Your browser does not support WebGL.");
+      }
+      // =============== FRAMES ===============
+
+      const MAX_FRAMES = gl.getParameter(gl.MAX_ARRAY_TEXTURE_LAYERS)
+      NUM_FRAMES = Math.min( NUM_FRAMES, MAX_FRAMES )
+
+      console.log({
+          WIDTH,
+          HEIGHT,
+          NUM_FRAMES, 
+          MAX_FRAMES,
+          RAM_USAGE,
+          FPS,
+          TIME
+      })
+
+      // =============== SHADERS ===============
+
+      const program = gl.createProgram();
+      const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+      gl.shaderSource(vertexShader, `#version 300 es
+        in vec2 position;
+        uniform vec2 resolution;
+        out vec2 uv;
+        void main() {
+          uv = (position + 1.0) / 2.0;
+          uv.y = 1.0 - uv.y;
+          gl_Position = vec4(position, 0, 1);
+        }
+      `);
+      gl.compileShader(vertexShader);
+      if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) console.error('VERTEX\n',gl.getShaderInfoLog(vertexShader));
+      const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+      gl.shaderSource(fragmentShader, `#version 300 es
+        precision mediump float;
+        uniform sampler2D video;
+        uniform int idx;
+        uniform mediump sampler2DArray frames;
+        uniform vec2 resolution;
+        in vec2 uv;
+        out vec4 fragColor;
+        void main() {
+          // int totalFrames = int(frames.arraySize);
+          vec2 xy = uv * resolution;
+          int lookup = ( int(xy.y) + idx ) % ${NUM_FRAMES};
+          vec4 color = texture(frames, vec3(uv, lookup));
+          fragColor = color;
+        }
+      `);
+
+      // =============== COMPILE ===============
+
+      gl.compileShader(fragmentShader);
+      if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) console.error('FRAG\n',gl.getShaderInfoLog(fragmentShader));
+      gl.attachShader(program, vertexShader);
+      gl.attachShader(program, fragmentShader);
+      gl.linkProgram(program);
+      gl.useProgram(program);
+
+      // =============== VERTEXES ===============
+
+      const vertexBuffer = gl.createBuffer();
+      gl.bindBuffer(gl.ARRAY_BUFFER, vertexBuffer);
+      gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+      const positionLocation = gl.getAttribLocation(program, "position");
+      gl.enableVertexAttribArray(positionLocation);
+      gl.vertexAttribPointer(positionLocation, 2, gl.FLOAT, false, 0, 0);
+
+
+      // =============== SINGLE ===============
+
+      const videoLocation = gl.getUniformLocation(program, "video");
+      const texture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+
+      const resolutionLocation = gl.getUniformLocation(program, 'resolution');
+
+      // =============== MULTI ===============
+
+      let IDX = 0;
+      const frameArrayTexture = gl.createTexture();
+      gl.bindTexture(gl.TEXTURE_2D_ARRAY, frameArrayTexture);
+      gl.texStorage3D(gl.TEXTURE_2D_ARRAY, 1, gl[PIXEL_TYPE], WIDTH, HEIGHT, NUM_FRAMES);
+
+      const framesLocation = gl.getUniformLocation(program, "frames");
+      const frameIndex = gl.getUniformLocation(program, "idx");
+      gl.uniform1i(framesLocation, 0);
+
+      // =============== CAMERA ===============
+
+      navigator.mediaDevices.getUserMedia({video: true})
+        .then(stream => {
+
+          // =============== VIDEO ===============
+
+          let video = document.getElementById('video')
+
+          if (USE_VIDEO) {
+            video.src = USE_VIDEO;
+            video.play();
+          } else {
+            video.srcObject = stream;
+            video.play();
+          }
+
+          video.addEventListener('loadedmetadata', e => {
+              gl.uniform2f(resolutionLocation, WIDTH,HEIGHT);
+          })
+
+          function draw() {
+
+            if (video.readyState === video.HAVE_ENOUGH_DATA) {
+
+
+              // =============== SINGLE ===============
+
+              gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
+              gl.uniform1i(videoLocation, 0);
+              gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+
+              // =============== MULTI ===============
+
+
+              gl.activeTexture(gl.TEXTURE0);
+              gl.bindTexture(gl.TEXTURE_2D_ARRAY, frameArrayTexture);
+              gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, IDX, WIDTH, HEIGHT, 1, gl.RGB, gl.UNSIGNED_BYTE, video);
+              IDX = (IDX + 1) % NUM_FRAMES;
+              gl.uniform1i(frameIndex, IDX);
+            }
+
+            // =============== NEXT ===============
+
+            requestAnimationFrame(draw);
+          }
+          draw();
+        })
+        .catch(error => {
+          console.error("Failed to get video stream:", error);
+        });
+
+</script>
+</body>
+</html>
