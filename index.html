@@ -121,7 +121,13 @@
 					vec2 uvC = vec2(mouse.x,uv.y);
 					vec4 colorC = texture(frames, vec3(uvC, lookupC));
 
-					fragColor = colorC;
+					// [D] static
+
+					int lookupD = ( int(xy.x) + idx ) % ${NUM_FRAMES};
+					vec2 uvD = vec2(mouse.x,uv.y);
+					vec4 colorD = texture(frames, vec3(uvC, lookupD));
+
+					fragColor = colorA;
 				}
 			`);
 
