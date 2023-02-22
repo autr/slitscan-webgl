@@ -100,6 +100,7 @@
 				uniform mediump sampler2DArray frames;
 				uniform vec2 resolution;
 				uniform vec2 mouse;
+				uniform int pingpong;
 				in vec2 uv;
 				out vec4 fragColor;
 				void main() {
@@ -123,11 +124,12 @@
 
 					// [D] static
 
-					int lookupD = ( int(xy.x) + idx ) % ${NUM_FRAMES};
-					vec2 uvD = vec2(mouse.x,uv.y);
-					vec4 colorD = texture(frames, vec3(uvC, lookupD));
+					int lookupD = ( int(resolution.x - xy.x) + idx ) % ${NUM_FRAMES};
+					float xD = float(lookupD)/resolution.x;
+					vec2 uvD = vec2(xD,uv.y);
+					vec4 colorD = texture(frames, vec3(uvD, lookupD));
 
-					fragColor = colorA;
+					fragColor = colorD;
 				}
 			`);
 
@@ -186,6 +188,10 @@
 				mouse: {
 					type: 'uniform2f',
 					value: [0.5,0.5]
+				},
+				pingpong: {
+					type: 'uniform1i',
+					value: [1]
 				}
 			}
 
@@ -260,30 +266,49 @@
 						if (video.readyState === video.HAVE_ENOUGH_DATA) {
 
 
-							// =============== SINGLE ===============
+							// =============== DRAW ===============
+
+							gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+						}
+
+						requestAnimationFrame(draw)
+					}
+
+					function grab() {
+
+						if (video.readyState === video.HAVE_ENOUGH_DATA) {
+
+							// =============== CAMTEX ===============
 
 							gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, video);
 							gl.uniform1i(videoLocation, 0);
-							gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 
-							// =============== MULTI ===============
+							// =============== TEXARRAY ===============
 
 
 							gl.activeTexture(gl.TEXTURE0);
 							gl.bindTexture(gl.TEXTURE_2D_ARRAY, frameArrayTexture);
 							gl.texSubImage3D(gl.TEXTURE_2D_ARRAY, 0, 0, 0, IDX, WIDTH, HEIGHT, 1, gl.RGB, gl.UNSIGNED_BYTE, video)
-							IDX = (IDX + 1 ) % NUM_FRAMES
+
+							IDX = (IDX + 1 )
+							if (IDX >= NUM_FRAMES) {
+								IDX %= NUM_FRAMES
+								CONTROLS.pingpong.value = CONTROLS.pingpong.value ? 0.0 : 1.0
+								gl.uniform1i(CONTROLS.pingpong.location, CONTROLS.pingpong.value)
+								console.log('BOOP', CONTROLS.pingpong.value)
+
+							}
 							gl.uniform1i(frameIndex, IDX)
+
+
 						}
-
-						// =============== NEXT ===============
-
 						let speed = CONTROLS.mouse.value[1] - 0.5
 						if (speed < 0) speed = 0
 						speed = speed * 100
-						setTimeout( e => requestAnimationFrame(draw), speed )
+						setTimeout( grab, speed)
 					}
 					draw()
+					grab()
 				})
 				.catch(error => {
 					console.error("Failed to get video stream:", error);
