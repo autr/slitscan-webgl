@@ -126,6 +126,9 @@
 
 					int lookupD = ( int(resolution.x - xy.x) + idx ) % ${NUM_FRAMES};
 					float xD = float(lookupD)/resolution.x;
+					if (( int(xy.x) < idx && pingpong == 1 ) || ( int(xy.x)  > idx && pingpong == 0)) {
+						xD = 1.0 - xD;
+					}
 					vec2 uvD = vec2(xD,uv.y);
 					vec4 colorD = texture(frames, vec3(uvD, lookupD));
 
